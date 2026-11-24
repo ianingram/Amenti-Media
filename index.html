@@ -148,7 +148,7 @@
       (b.prompts || []).forEach(function (p) {
         total++; var c = S.copied[p.tag], a = S.arrived[p.tag] || p.arrived; if (c) copied++;
         if (filt === 'todo' && c) return; if (filt === 'wait' && !(c && !a)) return;
-        if (q && (p.tag + ' ' + p.where + ' ' + p.text + ' ' + b.title + ' ' + (b.note || '')).toLowerCase().replace(/bk3/g, '').indexOf(q.replace(/^bk3/, '')) < 0) return;
+        if (q) { var qq = q.replace(/^bk3/, ''); if (/^[a-z]{1,3}-\d+$/.test(qq) ? p.tag.toLowerCase().replace(/^bk3/, '') !== qq : (p.tag + ' ' + p.where + ' ' + p.text + ' ' + b.title + ' ' + (b.note || '')).toLowerCase().indexOf(q) < 0) return; }
         rows += '<div class="slip' + (c ? ' done' : '') + '"><div class="top"><span class="tag">' + esc(p.tag) + '</span>' +
           '<button class="copy" data-tag="' + esc(p.tag) + '">' + (c ? 'copy again' : 'Copy') + '</button></div>' +
           '<div class="where">' + esc(p.where) + '</div><div class="text">' + esc(p.text) + '</div><div class="stamps">' +
