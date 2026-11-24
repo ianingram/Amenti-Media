@@ -97,7 +97,7 @@
   <section id="desk" style="margin-top:34px">
     <h2>The Prompt Desk</h2>
     <p class="note">Copy a prompt, paste it into Midjourney: it is stamped COPIED. Drop the takes below: their prompts are stamped ARRIVED, and pictures already sent are caught before they go up again.</p>
-    <div class="filters"><button data-f="all" aria-pressed="true">All</button><button data-f="todo" aria-pressed="false">Not yet copied</button><button data-f="wait" aria-pressed="false">Copied, not arrived</button><span class="count" id="deskcount"></span></div>
+    <div class="filters"><button data-f="all" aria-pressed="true">All</button><button data-f="todo" aria-pressed="false">Not yet copied</button><button data-f="wait" aria-pressed="false">Copied, not arrived</button><input id="desksearch" type="search" placeholder="search: CA-1, castle, XXVII…" style="flex:1;min-width:180px;max-width:320px;font-size:13px"><span class="count" id="deskcount"></span></div>
     <div id="slips"><p class="note">Loading the prompts…</p></div>
   </section>
 
@@ -142,11 +142,13 @@
   }
   function render() {
     var total = 0, copied = 0, html = '';
-    D.batches.forEach(function (b) {
+    var q = ($('desksearch') && $('desksearch').value || '').trim().toLowerCase();
+    D.batches.slice().reverse().forEach(function (b) {   // newest batch first
       var rows = '';
       (b.prompts || []).forEach(function (p) {
         total++; var c = S.copied[p.tag], a = S.arrived[p.tag] || p.arrived; if (c) copied++;
         if (filt === 'todo' && c) return; if (filt === 'wait' && !(c && !a)) return;
+        if (q && (p.tag + ' ' + p.where + ' ' + p.text + ' ' + b.title + ' ' + (b.note || '')).toLowerCase().replace(/bk3/g, '').indexOf(q.replace(/^bk3/, '')) < 0) return;
         rows += '<div class="slip' + (c ? ' done' : '') + '"><div class="top"><span class="tag">' + esc(p.tag) + '</span>' +
           '<button class="copy" data-tag="' + esc(p.tag) + '">' + (c ? 'copy again' : 'Copy') + '</button></div>' +
           '<div class="where">' + esc(p.where) + '</div><div class="text">' + esc(p.text) + '</div><div class="stamps">' +
@@ -170,6 +172,7 @@
     if (u) saveStamps(function (s) { delete s.copied[u.dataset.undo]; });
   });
   function fallbackCopy(t) { var ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (e) {} ta.remove(); }
+  $('desksearch').oninput = render;
   [].forEach.call(document.querySelectorAll('.filters button'), function (b) { b.onclick = function () { filt = b.dataset.f; [].forEach.call(document.querySelectorAll('.filters button'), function (x) { x.setAttribute('aria-pressed', x === b); }); render(); }; });
   fetch(PROMPTS + '?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) { D = j; render(); })
     .catch(function () { $('slips').innerHTML = '<p class="note">Could not load the prompts.</p>'; });
