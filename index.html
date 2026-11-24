@@ -145,7 +145,7 @@
     D.batches.forEach(function (b) {
       var rows = '';
       (b.prompts || []).forEach(function (p) {
-        total++; var c = S.copied[p.tag], a = S.arrived[p.tag]; if (c) copied++;
+        total++; var c = S.copied[p.tag], a = S.arrived[p.tag] || p.arrived; if (c) copied++;
         if (filt === 'todo' && c) return; if (filt === 'wait' && !(c && !a)) return;
         rows += '<div class="slip' + (c ? ' done' : '') + '"><div class="top"><span class="tag">' + esc(p.tag) + '</span>' +
           '<button class="copy" data-tag="' + esc(p.tag) + '">' + (c ? 'copy again' : 'Copy') + '</button></div>' +
