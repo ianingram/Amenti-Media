@@ -90,7 +90,7 @@
   <label for="worker">Media Worker address</label>
   <input id="worker" value="https://amenti-media.ingram-ian.workers.dev">
 
-  <div id="drop"><b>Drop files here</b>or click to choose · Midjourney zips, mp4, jpeg, png, mp3 · up to 100 MB each · a zip is renamed for you</div>
+  <div id="drop"><b>Drop files here</b>or click to choose · Midjourney zips, mp4, jpeg, png, mp3 · up to 100 MB each · a zip is renamed for you, and pictures already sent are taken out</div>
   <input id="pick" type="file" multiple hidden>
   <div id="queue"></div>
 
@@ -200,13 +200,21 @@
           var first = S.files[fileKey(seen[0])];
           if (!confirm('All ' + names.length + ' pictures in ' + f.name + ' were already sent (' + when(first.at) + ', ' + first.zip + ').\n\nSend them again?')) return;
         }
-        var name = /\.zip$/i.test(f.name) ? stampName(i) : safe(f.name);
-        var row = document.createElement('div'); row.className = 'file';
-        row.innerHTML = '<div class="top"><span class="name"></span><span class="size"></span></div><div class="bar"><i></i></div><div class="msg">waiting…</div>';
-        row.querySelector('.name').textContent = folderEl.value + name + (name !== f.name ? '   (was ' + f.name + ')' : '');
-        row.querySelector('.size').textContent = mb(f.size);
-        if (seen.length && seen.length < names.length) row.querySelector('.msg').textContent = 'waiting… ' + seen.length + ' of ' + names.length + ' pictures were sent before';
-        $('queue').prepend(row); waiting.push({ f: f, row: row, path: folderEl.value + name, names: names });
+        var fresh = names.filter(function (n) { return !S.files[fileKey(n)]; });
+        var trim = /\.zip$/i.test(f.name) && seen.length && fresh.length && window.JSZip;
+        return (trim ? JSZip.loadAsync(f).then(function (z) {   // keep only the pictures not sent before
+          var out = new JSZip();
+          return Promise.all(fresh.map(function (n) { return z.files[n].async('uint8array').then(function (b) { out.file(n.split('/').pop(), b); }); }))
+            .then(function () { return out.generateAsync({ type: 'blob', compression: 'STORE', mimeType: 'application/zip' }); });
+        }) : Promise.resolve(f)).then(function (up) {
+          var name = /\.zip$/i.test(f.name) ? stampName(i) : safe(f.name);
+          var row = document.createElement('div'); row.className = 'file';
+          row.innerHTML = '<div class="top"><span class="name"></span><span class="size"></span></div><div class="bar"><i></i></div><div class="msg">waiting…</div>';
+          row.querySelector('.name').textContent = folderEl.value + name + (name !== f.name ? '   (was ' + f.name + ')' : '');
+          row.querySelector('.size').textContent = mb(up.size) + (trim ? ' (was ' + mb(f.size) + ')' : '');
+          if (trim) row.querySelector('.msg').textContent = 'waiting… sending only the ' + fresh.length + ' new pictures; ' + seen.length + ' were sent before and are left out';
+          $('queue').prepend(row); waiting.push({ f: up, orig: f.name, row: row, path: folderEl.value + name, names: trim ? fresh : names });
+        });
       });
     }); }, Promise.resolve()).then(next);
   }
@@ -217,7 +225,7 @@
     var x = new XMLHttpRequest();
     x.open('PUT', base() + '/upload/' + job.path.split('/').map(encodeURIComponent).join('/'));
     x.setRequestHeader('X-Upload-Key', keyEl.value);
-    if (job.f.type) x.setRequestHeader('Content-Type', job.f.type);
+    x.setRequestHeader('Content-Type', job.f.type || 'application/octet-stream');
     x.upload.onprogress = function (e) { if (e.lengthComputable) { bar.style.width = (100 * e.loaded / e.total) + '%'; msg.textContent = 'uploading… ' + Math.round(100 * e.loaded / e.total) + '%'; } };
     x.onload = function () {
       var r = {}; try { r = JSON.parse(x.responseText); } catch (e) {}
@@ -227,7 +235,7 @@
         var tl = Object.keys(tags);
         msg.textContent = 'stored' + (job.names.length > 1 ? ' · ' + job.names.length + ' pictures' : '') + (tl.length ? ' · arrived: ' + tl.join(', ') : '');
         var now = Date.now();
-        saveStamps(function (s) { job.names.forEach(function (n) { s.files[fileKey(n)] = { zip: job.path, at: now }; }); s.sent[job.path] = { was: job.f.name, tags: tl, pictures: job.names.length }; tl.forEach(function (t) { s.arrived[t] = now; }); });
+        saveStamps(function (s) { job.names.forEach(function (n) { s.files[fileKey(n)] = { zip: job.path, at: now }; }); s.sent[job.path] = { was: job.orig || job.f.name, tags: tl, pictures: job.names.length }; tl.forEach(function (t) { s.arrived[t] = now; }); });
         var l = document.createElement('div'); l.className = 'link';
         l.innerHTML = '<input readonly><button>copy link</button>'; l.querySelector('input').value = r.url;
         l.querySelector('button').onclick = function () { l.querySelector('input').select(); document.execCommand('copy'); this.textContent = 'copied'; };
