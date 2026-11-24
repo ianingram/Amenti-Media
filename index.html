@@ -117,7 +117,7 @@
   try { var f0 = localStorage.getItem('amenti-media-folder'); if (f0) folderEl.value = f0; } catch (e) {}
   folderEl.addEventListener('change', function () { try { localStorage.setItem('amenti-media-folder', folderEl.value); } catch (e) {} });
   var base = function () { return workerEl.value.replace(/\/+$/, ''); };
-  var mb = function (n) { return (n / 1048576).toFixed(1) + ' MB'; };
+  var mb = function (n) { return (n / 1e6).toFixed(1) + ' MB'; };   // decimal, as the Mac's Finder shows
   var safe = function (n) { return n.replace(/[^\w\-. ]/g, '_').replace(/\s+/g, '-'); };
   var esc = function (t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
   var when = function (t) { var d = new Date(t); return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
@@ -125,17 +125,17 @@
   /* ---------- THE PROMPT DESK ---------- */
   var PROMPTS = 'https://ianingram.github.io/Amenti-Readings/tools/desk/prompts.json';
   var STAMPS = 'misc/desk-stamps.json';
-  var D = { batches: [] }, S = { copied: {}, arrived: {}, files: {} }, filt = 'all';
+  var D = { batches: [] }, S = { copied: {}, arrived: {}, files: {}, sent: {} }, filt = 'all';
   var tagOf = function (name) { var m = /BK\d?[A-Z0-9]*-\d+/i.exec(name); return m ? m[0].toUpperCase() : null; };
   var fileKey = function (name) { return name.split('/').pop().toLowerCase(); };
   function loadStamps() {
     return fetch(base() + '/m/' + STAMPS + '?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (j) { if (j) S = { copied: j.copied || {}, arrived: j.arrived || {}, files: j.files || {} }; render(); }).catch(function () { render(); });
+      .then(function (j) { if (j) S = { copied: j.copied || {}, arrived: j.arrived || {}, files: j.files || {}, sent: j.sent || {} }; render(); listStored(); }).catch(function () { render(); });
   }
   function saveStamps(change) {          // read the latest, apply one change, write back
     return fetch(base() + '/m/' + STAMPS + '?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; })
       .then(function (j) {
-        S = { copied: j.copied || {}, arrived: j.arrived || {}, files: j.files || {} }; change(S); render();
+        S = { copied: j.copied || {}, arrived: j.arrived || {}, files: j.files || {}, sent: j.sent || {} }; change(S); render();
         if (!keyEl.value) return;
         return fetch(base() + '/upload/' + STAMPS, { method: 'PUT', headers: { 'X-Upload-Key': keyEl.value, 'Content-Type': 'application/json' }, body: JSON.stringify(S) });
       });
@@ -227,7 +227,7 @@
         var tl = Object.keys(tags);
         msg.textContent = 'stored' + (job.names.length > 1 ? ' · ' + job.names.length + ' pictures' : '') + (tl.length ? ' · arrived: ' + tl.join(', ') : '');
         var now = Date.now();
-        saveStamps(function (s) { job.names.forEach(function (n) { s.files[fileKey(n)] = { zip: job.path, at: now }; }); tl.forEach(function (t) { s.arrived[t] = now; }); });
+        saveStamps(function (s) { job.names.forEach(function (n) { s.files[fileKey(n)] = { zip: job.path, at: now }; }); s.sent[job.path] = { was: job.f.name, tags: tl, pictures: job.names.length }; tl.forEach(function (t) { s.arrived[t] = now; }); });
         var l = document.createElement('div'); l.className = 'link';
         l.innerHTML = '<input readonly><button>copy link</button>'; l.querySelector('input').value = r.url;
         l.querySelector('button').onclick = function () { l.querySelector('input').select(); document.execCommand('copy'); this.textContent = 'copied'; };
@@ -235,7 +235,10 @@
       } else { msg.textContent = 'failed: ' + (r.error || ('HTTP ' + x.status)); msg.className = 'msg bad'; }
       busy = false; next();
     };
-    x.onerror = function () { msg.textContent = 'failed: could not reach the Worker — check its address'; msg.className = 'msg bad'; busy = false; next(); };
+    x.onerror = function () {
+      job.tries = (job.tries || 0) + 1;
+      if (job.tries <= 2) { msg.textContent = 'connection dropped — trying again (' + job.tries + ' of 2)…'; busy = false; waiting.unshift(job); return setTimeout(next, 4000); }
+      msg.textContent = 'failed: the connection dropped three times — drop this file again'; msg.className = 'msg bad'; busy = false; next(); };
     x.send(job.f);
   }
   function listStored() {
@@ -245,8 +248,12 @@
       box.innerHTML = '';
       items.sort(function (a, b) { return a.uploaded > b.uploaded ? -1 : 1; }).forEach(function (o) {
         var d = document.createElement('div'); d.className = 'file';
-        d.innerHTML = '<a class="name" target="_blank"></a><span class="size"></span>';
+        d.innerHTML = '<div><a class="name" target="_blank"></a><div class="note what"></div></div><span class="size"></span>';
         d.querySelector('a').href = o.url; d.querySelector('a').textContent = o.path; d.querySelector('.size').textContent = mb(o.size) + (o.uploaded ? ' · ' + when(o.uploaded) : '');
+        var sent = (S.sent || {})[o.path], tags = {}, n = 0;
+        Object.keys(S.files).forEach(function (k) { if (S.files[k].zip === o.path) { n++; var t = tagOf(k); if (t) tags[t.toUpperCase()] = 1; } });
+        var tl = sent && sent.tags && sent.tags.length ? sent.tags : Object.keys(tags).sort();
+        d.querySelector('.what').textContent = [tl.length ? tl.join(', ') : '', (sent ? sent.pictures : n) ? (sent ? sent.pictures : n) + ' pictures' : '', sent ? 'was ' + sent.was : ''].filter(Boolean).join(' · ');
         box.appendChild(d);
       });
     }).catch(function () { box.innerHTML = '<p class="note">Could not reach the media Worker yet — check its address above.</p>'; });
