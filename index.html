@@ -1,4 +1,9 @@
-<!-- Amenti-Media/index.html · 2026-10-18 · the Media Door, in its own repo (was Amenti-Studios/upload.html) -->
+<!-- Amenti-Media/index.html · 2026-10-18 · the Media Door, in its own repo (was Amenti-Studios/upload.html)
+     23 Nov 2026 · THE PROMPT DESK joins the Door (Ian): the Midjourney prompts Claude writes (Amenti-Readings
+     tools/desk/prompts.json) with Copy buttons that stamp them COPIED; a dropped zip is read before it goes up,
+     its pictures stamp their prompts ARRIVED, pictures already sent are caught, and the zip gets its own dated
+     name (no more renaming midjourney_session.zip by hand). Stamps live in the bucket at misc/desk-stamps.json,
+     where Claude reads them. -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -40,12 +45,31 @@
   h2{font-family:var(--serif);font-weight:400;color:#fff;margin:44px 0 6px;font-size:22px}
   #stored .file{display:flex;justify-content:space-between;gap:12px;align-items:center}
   .note{color:var(--mist);font-size:12px;line-height:1.6}
+  #desk{margin:6px 0 34px;border:1px solid var(--rule);border-radius:8px;padding:16px 16px 6px;background:#0a0e13}
+  #desk h2{margin:0 0 4px}
+  .filters{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 6px;align-items:center}
+  .filters button[aria-pressed=true]{background:var(--gold);color:var(--ink)}
+  .filters .count{margin-left:auto;color:var(--mist);font-size:12px}
+  .batch{font-family:var(--serif);color:#fff;font-size:18px;margin:18px 0 2px}
+  .batch small{color:var(--mist);font-family:var(--mono);font-size:11px;margin-left:8px}
+  .slip{border:1px solid var(--rule);border-radius:6px;padding:12px 14px;margin:10px 0;background:var(--panel)}
+  .slip.done{opacity:.6}
+  .slip .top{display:flex;justify-content:space-between;gap:12px;align-items:center}
+  .slip .tag{color:var(--gold);font-weight:600} .slip .where{color:var(--mist);font-size:12px;margin:4px 0 8px}
+  .slip .text{color:var(--pale);font-family:var(--serif);font-size:14px;line-height:1.5;border:1px dashed var(--rule);border-radius:4px;padding:8px 10px;word-break:break-word}
+  .stamps{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;min-height:4px}
+  .st{font-size:11px;letter-spacing:.06em;padding:3px 7px;border:2px solid;border-radius:3px;transform:rotate(-1.5deg)}
+  .st.c{color:var(--bad);border-color:var(--bad)} .st.a{color:var(--ok);border-color:var(--ok)}
+  .undo{border:0;color:var(--mist);text-decoration:underline;padding:2px 4px}
+  .undo:hover{background:none;color:var(--pale)}
+  .slip .copy{min-height:40px;min-width:96px;font-size:13px}
 </style>
 </head>
 <body>
 <main>
   <h1>THE MEDIA DOOR</h1>
   <div class="sub">Amenti · video, pictures and audio of any size · code goes through the inboxes</div>
+
 
   <div class="row">
     <div><label for="folder">Production</label>
@@ -66,26 +90,92 @@
   <label for="worker">Media Worker address</label>
   <input id="worker" value="https://amenti-media.ingram-ian.workers.dev">
 
-  <div id="drop"><b>Drop files here</b>or click to choose · mp4, jpeg, png, mp3 · any size up to 100 MB each</div>
+  <div id="drop"><b>Drop files here</b>or click to choose · Midjourney zips, mp4, jpeg, png, mp3 · up to 100 MB each · a zip is renamed for you</div>
   <input id="pick" type="file" multiple hidden>
   <div id="queue"></div>
 
+  <section id="desk" style="margin-top:34px">
+    <h2>The Prompt Desk</h2>
+    <p class="note">Copy a prompt, paste it into Midjourney: it is stamped COPIED. Drop the takes below: their prompts are stamped ARRIVED, and pictures already sent are caught before they go up again.</p>
+    <div class="filters"><button data-f="todo" aria-pressed="true">Not yet copied</button><button data-f="wait" aria-pressed="false">Copied, not arrived</button><button data-f="all" aria-pressed="false">All</button><span class="count" id="deskcount"></span></div>
+    <div id="slips"><p class="note">Loading the prompts…</p></div>
+  </section>
+
   <h2>Already stored</h2>
-  <p class="note">Everything in the chosen production's folder. Claude can read this list too, so after uploading just say "it's uploaded".</p>
+  <p class="note">Everything in the chosen production's folder, newest first. Claude can read this list too, so after uploading just say "check the door".</p>
   <div id="stored"><p class="note">Choose a production above.</p></div>
 </main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var keyEl = $('key'), workerEl = $('worker'), folderEl = $('folder');
   try { keyEl.value = localStorage.getItem('amenti-media-key') || ''; workerEl.value = localStorage.getItem('amenti-media-worker') || workerEl.value; } catch (e) {}
-  keyEl.onchange = function () { try { localStorage.setItem('amenti-media-key', keyEl.value); } catch (e) {} };
+  keyEl.onchange = function () { try { localStorage.setItem('amenti-media-key', keyEl.value); } catch (e) {} loadStamps(); };
   workerEl.onchange = function () { try { localStorage.setItem('amenti-media-worker', workerEl.value.replace(/\/+$/, '')); } catch (e) {} listStored(); };
   folderEl.onchange = listStored;
+  try { var f0 = localStorage.getItem('amenti-media-folder'); if (f0) folderEl.value = f0; } catch (e) {}
+  folderEl.addEventListener('change', function () { try { localStorage.setItem('amenti-media-folder', folderEl.value); } catch (e) {} });
   var base = function () { return workerEl.value.replace(/\/+$/, ''); };
   var mb = function (n) { return (n / 1048576).toFixed(1) + ' MB'; };
   var safe = function (n) { return n.replace(/[^\w\-. ]/g, '_').replace(/\s+/g, '-'); };
+  var esc = function (t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var when = function (t) { var d = new Date(t); return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
 
+  /* ---------- THE PROMPT DESK ---------- */
+  var PROMPTS = 'https://ianingram.github.io/Amenti-Readings/tools/desk/prompts.json';
+  var STAMPS = 'misc/desk-stamps.json';
+  var D = { batches: [] }, S = { copied: {}, arrived: {}, files: {} }, filt = 'todo';
+  var tagOf = function (name) { var m = /BK\d?[A-Z0-9]*-\d+/i.exec(name); return m ? m[0].toUpperCase() : null; };
+  var fileKey = function (name) { return name.split('/').pop().toLowerCase(); };
+  function loadStamps() {
+    return fetch(base() + '/m/' + STAMPS + '?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j) S = { copied: j.copied || {}, arrived: j.arrived || {}, files: j.files || {} }; render(); }).catch(function () { render(); });
+  }
+  function saveStamps(change) {          // read the latest, apply one change, write back
+    return fetch(base() + '/m/' + STAMPS + '?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; })
+      .then(function (j) {
+        S = { copied: j.copied || {}, arrived: j.arrived || {}, files: j.files || {} }; change(S); render();
+        if (!keyEl.value) return;
+        return fetch(base() + '/upload/' + STAMPS, { method: 'PUT', headers: { 'X-Upload-Key': keyEl.value, 'Content-Type': 'application/json' }, body: JSON.stringify(S) });
+      });
+  }
+  function render() {
+    var total = 0, copied = 0, html = '';
+    D.batches.forEach(function (b) {
+      var rows = '';
+      (b.prompts || []).forEach(function (p) {
+        total++; var c = S.copied[p.tag], a = S.arrived[p.tag]; if (c) copied++;
+        if (filt === 'todo' && c) return; if (filt === 'wait' && !(c && !a)) return;
+        rows += '<div class="slip' + (c ? ' done' : '') + '"><div class="top"><span class="tag">' + esc(p.tag) + '</span>' +
+          '<button class="copy" data-tag="' + esc(p.tag) + '">' + (c ? 'copy again' : 'Copy') + '</button></div>' +
+          '<div class="where">' + esc(p.where) + '</div><div class="text">' + esc(p.text) + '</div><div class="stamps">' +
+          (c ? '<span class="st c">COPIED · ' + esc(when(c)) + '</span><button class="undo" data-undo="' + esc(p.tag) + '">unmark</button>' : '') +
+          (a ? '<span class="st a">ARRIVED · ' + esc(when(a)) + '</span>' : '') + '</div></div>';
+      });
+      if (rows) html += '<div class="batch">' + esc(b.title) + '<small>' + esc(b.note || '') + '</small></div>' + rows;
+    });
+    $('slips').innerHTML = html || '<p class="note">' + (D.batches.length ? (filt === 'todo' ? 'Every prompt here has been copied.' : 'Nothing here.') : 'No prompts yet.') + '</p>';
+    $('deskcount').textContent = copied + ' of ' + total + ' copied' + (keyEl.value ? '' : ' · enter the upload key to keep stamps');
+  }
+  $('slips').addEventListener('click', function (e) {
+    var c = e.target.closest('.copy'), u = e.target.closest('.undo');
+    if (c) {
+      var p = null; D.batches.forEach(function (b) { (b.prompts || []).forEach(function (x) { if (x.tag === c.dataset.tag) p = x; }); });
+      if (!p) return;
+      var done = function () { c.textContent = 'copied ✓'; saveStamps(function (s) { s.copied[p.tag] = Date.now(); }); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(p.text).then(done, function () { fallbackCopy(p.text); done(); });
+      else { fallbackCopy(p.text); done(); }
+    }
+    if (u) saveStamps(function (s) { delete s.copied[u.dataset.undo]; });
+  });
+  function fallbackCopy(t) { var ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (e) {} ta.remove(); }
+  [].forEach.call(document.querySelectorAll('.filters button'), function (b) { b.onclick = function () { filt = b.dataset.f; [].forEach.call(document.querySelectorAll('.filters button'), function (x) { x.setAttribute('aria-pressed', x === b); }); render(); }; });
+  fetch(PROMPTS + '?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) { D = j; render(); })
+    .catch(function () { $('slips').innerHTML = '<p class="note">Could not load the prompts.</p>'; });
+  loadStamps();
+
+  /* ---------- THE DOOR ---------- */
   var drop = $('drop'), pick = $('pick');
   drop.onclick = function () { pick.click(); };
   pick.onchange = function () { queue([].slice.call(pick.files)); pick.value = ''; };
@@ -93,17 +183,32 @@
   ['dragleave', 'drop'].forEach(function (e) { drop.addEventListener(e, function (ev) { ev.preventDefault(); drop.classList.remove('over'); }); });
   drop.addEventListener('drop', function (ev) { queue([].slice.call(ev.dataTransfer.files)); });
 
+  var stampName = function (i) { var d = new Date(), p = function (n) { return String(n).padStart(2, '0'); };
+    return 'mj-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + (i ? '-' + i : '') + '.zip'; };
+  function inside(f) {                   // the picture names inside a zip, or the file's own name
+    if (!/\.zip$/i.test(f.name)) return Promise.resolve([f.name]);
+    if (!window.JSZip) return Promise.resolve([]);
+    return JSZip.loadAsync(f).then(function (z) { return Object.keys(z.files).filter(function (n) { return !z.files[n].dir && !/__MACOSX|\/\._|^\._/.test(n); }); }).catch(function () { return []; });
+  }
   var waiting = [], busy = false;
   function queue(files) {
     if (!keyEl.value) { alert('Enter the upload key first.'); return; }
-    files.forEach(function (f) {
-      var row = document.createElement('div'); row.className = 'file';
-      row.innerHTML = '<div class="top"><span class="name"></span><span class="size"></span></div><div class="bar"><i></i></div><div class="msg">waiting…</div>';
-      row.querySelector('.name').textContent = folderEl.value + safe(f.name);
-      row.querySelector('.size').textContent = mb(f.size);
-      $('queue').prepend(row); waiting.push({ f: f, row: row, path: folderEl.value + safe(f.name) });
-    });
-    next();
+    files.reduce(function (pr, f, i) { return pr.then(function () {
+      return inside(f).then(function (names) {
+        var seen = names.filter(function (n) { return S.files[fileKey(n)]; });
+        if (names.length && seen.length === names.length) {
+          var first = S.files[fileKey(seen[0])];
+          if (!confirm('All ' + names.length + ' pictures in ' + f.name + ' were already sent (' + when(first.at) + ', ' + first.zip + ').\n\nSend them again?')) return;
+        }
+        var name = /\.zip$/i.test(f.name) ? stampName(i) : safe(f.name);
+        var row = document.createElement('div'); row.className = 'file';
+        row.innerHTML = '<div class="top"><span class="name"></span><span class="size"></span></div><div class="bar"><i></i></div><div class="msg">waiting…</div>';
+        row.querySelector('.name').textContent = folderEl.value + name + (name !== f.name ? '   (was ' + f.name + ')' : '');
+        row.querySelector('.size').textContent = mb(f.size);
+        if (seen.length && seen.length < names.length) row.querySelector('.msg').textContent = 'waiting… ' + seen.length + ' of ' + names.length + ' pictures were sent before';
+        $('queue').prepend(row); waiting.push({ f: f, row: row, path: folderEl.value + name, names: names });
+      });
+    }); }, Promise.resolve()).then(next);
   }
   function next() {
     if (busy || !waiting.length) return;
@@ -117,7 +222,12 @@
     x.onload = function () {
       var r = {}; try { r = JSON.parse(x.responseText); } catch (e) {}
       if (x.status === 200 && r.ok) {
-        bar.style.width = '100%'; msg.textContent = 'stored'; msg.className = 'msg ok';
+        bar.style.width = '100%'; msg.className = 'msg ok';
+        var tags = {}; job.names.forEach(function (n) { var t = tagOf(n); if (t) tags[t] = 1; });
+        var tl = Object.keys(tags);
+        msg.textContent = 'stored' + (job.names.length > 1 ? ' · ' + job.names.length + ' pictures' : '') + (tl.length ? ' · arrived: ' + tl.join(', ') : '');
+        var now = Date.now();
+        saveStamps(function (s) { job.names.forEach(function (n) { s.files[fileKey(n)] = { zip: job.path, at: now }; }); tl.forEach(function (t) { s.arrived[t] = now; }); });
         var l = document.createElement('div'); l.className = 'link';
         l.innerHTML = '<input readonly><button>copy link</button>'; l.querySelector('input').value = r.url;
         l.querySelector('button').onclick = function () { l.querySelector('input').select(); document.execCommand('copy'); this.textContent = 'copied'; };
@@ -133,10 +243,10 @@
     fetch(base() + '/list?prefix=' + encodeURIComponent(folderEl.value)).then(function (r) { return r.json(); }).then(function (items) {
       if (!items.length) { box.innerHTML = '<p class="note">Nothing stored for this production yet.</p>'; return; }
       box.innerHTML = '';
-      items.sort(function (a, b) { return a.path < b.path ? -1 : 1; }).forEach(function (o) {
+      items.sort(function (a, b) { return a.uploaded > b.uploaded ? -1 : 1; }).forEach(function (o) {
         var d = document.createElement('div'); d.className = 'file';
         d.innerHTML = '<a class="name" target="_blank"></a><span class="size"></span>';
-        d.querySelector('a').href = o.url; d.querySelector('a').textContent = o.path; d.querySelector('.size').textContent = mb(o.size);
+        d.querySelector('a').href = o.url; d.querySelector('a').textContent = o.path; d.querySelector('.size').textContent = mb(o.size) + (o.uploaded ? ' · ' + when(o.uploaded) : '');
         box.appendChild(d);
       });
     }).catch(function () { box.innerHTML = '<p class="note">Could not reach the media Worker yet — check its address above.</p>'; });
